@@ -612,6 +612,10 @@ const AllView = new Lang.Class({
         // Update folder views
         for (let i = 0; i < this.folderIcons.length; i++)
             this.folderIcons[i].adaptToSize(availWidth, availHeight);
+    },
+
+    swarmAnimation: function() {
+        //this._grid.swarmAnimation(0);
     }
 });
 Signals.addSignalMethods(AllView.prototype);
@@ -677,6 +681,10 @@ const FrequentView = new Lang.Class({
         let availWidth = box.x2 - box.x1;
         let availHeight = box.y2 - box.y1;
         this._grid.adaptToSize(availWidth, availHeight);
+    },
+    
+    swarmAnimation: function() {
+        //this._grid.swarmAnimation();
     }
 });
 
@@ -782,6 +790,28 @@ const AppDisplay = new Lang.Class({
             initialView = Views.ALL;
         this._showView(initialView);
         this._updateFrequentVisibility();
+        
+        // ViewSelector null in Main.overview, so we can't connect to page-changed
+        // signal. Manage all from view selector for now calling swamAnimation
+        /*
+        log(Main);
+        log(Main.overview);
+        log(Main.overview.viewSelector);
+        Main.overview.viewSelector.connect('page-changed', Lang.bind(this,
+            function() {
+                if (Main.overview.viewSelector.getActivePage() == ViewSelector.ViewPage.APPS) {
+                    this._views[global.settings.get_uint('app-picker-view')].swarmAnimation();
+                }
+            }));
+            */
+    },
+    
+    swarmAnimation: function() {
+        log("appDisplay");
+        log(this._views);
+        let view = this._views[global.settings.get_uint('app-picker-view')].view;
+        log(view);
+        view.swarmAnimation();
     },
 
     _showView: function(activeIndex) {
@@ -1019,6 +1049,7 @@ const FolderIcon = new Lang.Class({
 
     _init: function(id, path, parentView) {
         this.id = id;
+        this._path = path;
         this._parentView = parentView;
 
         this._folder = new Gio.Settings({ schema_id: 'org.gnome.desktop.app-folders.folder',
@@ -1184,6 +1215,10 @@ const FolderIcon = new Lang.Class({
             this.view.adaptToSize(width, height);
         this._popupInvalidated = true;
     },
+    
+    clone: function() {
+        return new FolderIcon(this.id, this._path, this._parentView);
+    }
 });
 Signals.addSignalMethods(FolderIcon.prototype);
 
@@ -1320,6 +1355,7 @@ const AppIcon = new Lang.Class({
 
         iconParams['createIcon'] = Lang.bind(this, this._createIcon);
         iconParams['setSizeManually'] = true;
+        this._iconParams = iconParams;
         this.icon = new IconGrid.BaseIcon(app.get_name(), iconParams);
         this.actor.set_child(this.icon.actor);
 
@@ -1494,6 +1530,10 @@ const AppIcon = new Lang.Class({
     shouldShowTooltip: function() {
         return this.actor.hover && (!this._menu || !this._menu.isOpen);
     },
+    
+    clone: function() {
+        return new AppIcon(this.app, this._iconParams);
+    }
 });
 Signals.addSignalMethods(AppIcon.prototype);
 

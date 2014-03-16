@@ -240,6 +240,9 @@ const ViewSelector = new Lang.Class({
                              });
         else
             this._fadePageIn(oldPage);
+
+        if (this._activePage == this._appsPage)
+            this.appDisplay.swarmAnimation();
     },
 
     _a11yFocusPage: function(page) {

@@ -10,11 +10,16 @@ const St = imports.gi.St;
 const Lang = imports.lang;
 const Params = imports.misc.params;
 const Tweener = imports.ui.tweener;
+const Main = imports.ui.main;
 
 const ICON_SIZE = 96;
 const MIN_ICON_SIZE = 16;
 
 const EXTRA_SPACE_ANIMATION_TIME = 0.25;
+
+const SWARM_ANIMATION_TIME = 0.7;
+const SWARM_ANIMATION_MAX_DELAY_FOR_ITEM = 0.3;
+const SWARM_ANIMATION_FADE_IN_TIME_FOR_ITEM = 0.3;
 
 const BaseIcon = new Lang.Class({
     Name: 'BaseIcon',
@@ -23,7 +28,9 @@ const BaseIcon = new Lang.Class({
         params = Params.parse(params, { createIcon: null,
                                         setSizeManually: false,
                                         showLabel: true });
-
+        this.labelForClone = label;
+        this.paramsForClone = params;
+        
         let styleClass = 'overview-icon';
         if (params.showLabel)
             styleClass += ' overview-icon-with-label';
@@ -214,6 +221,14 @@ const IconGrid = new Lang.Class({
         this._grid.connect('get-preferred-width', Lang.bind(this, this._getPreferredWidth));
         this._grid.connect('get-preferred-height', Lang.bind(this, this._getPreferredHeight));
         this._grid.connect('allocate', Lang.bind(this, this._allocate));
+
+        this._paintedItems = [];   
+        this._animating = false; 
+        this._mappedId = this.actor.connect("notify::allocation", Lang.bind(this, 
+                function() {
+                    if (this.actor.mapped)
+                        this.swarmAnimation();
+                }));
     },
 
     _getPreferredWidth: function (grid, forHeight, alloc) {
@@ -240,6 +255,17 @@ const IconGrid = new Lang.Class({
             return actor.visible;
         });
         return children;
+    },
+
+    _getVisibleItems: function() {;
+        items = this._items.filter(function(item) {
+            return item.actor.visible;
+        });
+        return items;
+    },
+    
+    _getPaintedItems: function() {;
+        return this._paintedItems;
     },
 
     _getPreferredHeight: function (grid, forWidth, alloc) {
@@ -276,7 +302,7 @@ const IconGrid = new Lang.Class({
             box = this._grid.get_theme_node().get_content_box(gridBox);
         }
 
-        let children = this._getVisibleChildren();
+        let items = this._getVisibleItems();
         let availWidth = box.x2 - box.x1;
         let availHeight = box.y2 - box.y1;
         let spacing = this._getSpacing();
@@ -298,15 +324,18 @@ const IconGrid = new Lang.Class({
         let y = box.y1 + this.topPadding;
         let columnIndex = 0;
         let rowIndex = 0;
-        for (let i = 0; i < children.length; i++) {
-            let childBox = this._calculateChildBox(children[i], x, y, box);
+        this._paintedItems = [];
+        log("allocating opacity 0");
+        for (let i = 0; i < items.length; i++) {
+            let childBox = this._calculateChildBox(items[i].actor, x, y, box);
 
             if (this._rowLimit && rowIndex >= this._rowLimit ||
                 this._fillParent && childBox.y2 > availHeight - this.bottomPadding) {
-                this._grid.set_skip_paint(children[i], true);
+                this._grid.set_skip_paint(items[i].actor, true);
             } else {
-                children[i].allocate(childBox, flags);
-                this._grid.set_skip_paint(children[i], false);
+                items[i].actor.allocate(childBox, flags);
+                this._grid.set_skip_paint(items[i].actor, false);
+                this._paintedItems.push(items[i]);
             }
 
             columnIndex++;
@@ -322,6 +351,58 @@ const IconGrid = new Lang.Class({
                 x += this._getHItemSize() + spacing;
             }
         }
+    },
+
+    swarmAnimation: function() {
+        if (this._animating)
+            return;
+
+        this._animating = true;
+        let items = this._paintedItems;
+        log("animating" + items);
+
+        for (let index = 0; index < items.length; index++) {
+            items[index].actor.opacity = 0;
+            this._animateItem(items[index], this);
+        }
+    },
+
+    _animateItem: function(item) {
+        let itemClone = item.clone();
+        itemClone.actor.reactive = false;
+        let [width, height] = item.actor.get_transformed_size();
+        itemClone.actor.set_size(width, height);
+
+        let [finalX, finalY] = item.actor.get_transformed_position();
+
+        let dashShowAppsIcon = Main.overview._dash._showAppsIcon;
+        let [startX, startY] = dashShowAppsIcon.get_transformed_position();
+        itemClone.actor.set_position(startX, startY);
+        itemClone.actor.opacity = 0;
+        Tweener.addTween(itemClone.actor,
+                        { x: finalX,
+                          y: finalY,
+                          time: SWARM_ANIMATION_TIME,
+                          transition: 'easeInOutQuad',
+                          delay: Math.random() * SWARM_ANIMATION_MAX_DELAY_FOR_ITEM,
+                          onStart: function() {
+                              Tweener.addTween(itemClone.actor,
+                                               { opacity : 255,
+                                                 transition: 'easeInOutQuad',
+                                                 time: SWARM_ANIMATION_FADE_IN_TIME_FOR_ITEM });
+                            },
+                          onComplete: Lang.bind(this, function() {
+                                log("opacity 255");
+                                item.actor.opacity = 255;
+                                itemClone.actor.destroy();
+                                // Assume the random value of delay is not important,
+                                // and setting animating to true in the first finished
+                                // animation is fine.
+                                this._animating = false;
+                            })
+                        });
+
+        Main.uiGroup.add_actor(itemClone.actor);
     },
 
     _calculateChildBox: function(child, x, y, box) {
@@ -538,6 +619,13 @@ const PaginatedIconGrid = new Lang.Class({
         this._rowsPerPage = 0;
         this._spaceBetweenPages = 0;
         this._childrenPerPage = 0;
+        
+        this._mappedId = 0;
+                    this._mappedId = this.actor.connect("notify::allocation", Lang.bind(this, 
+                function() {
+                    if (this.actor.mapped)
+                        this.swarmAnimation(0);
+                }));
     },
 
     _getPreferredHeight: function (grid, forWidth, alloc) {
@@ -578,10 +666,16 @@ const PaginatedIconGrid = new Lang.Class({
         let columnIndex = 0;
         let rowIndex = 0;
 
-        for (let i = 0; i < children.length; i++) {
-            let childBox = this._calculateChildBox(children[i], x, y, box);
-            children[i].allocate(childBox, flags);
-            this._grid.set_skip_paint(children[i], false);
+/*
+        let dimmedItems = this._getItemsInPage(0);
+        for (let index = 0; index < dimmedItems.length; index++)
+            dimmedItems[index].actor.opacity = 0;*/
+
+        let visibleItems = this._getVisibleItems();
+        for (let i = 0; i < visibleItems.length; i++) {
+            let childBox = this._calculateChildBox(visibleItems[i].actor, x, y, box);
+            visibleItems[i].actor.allocate(childBox, flags);
+            this._grid.set_skip_paint(visibleItems[i].actor, false);
 
             columnIndex++;
             if (columnIndex == nColumns) {
@@ -595,6 +689,33 @@ const PaginatedIconGrid = new Lang.Class({
                 x = box.x1 + leftEmptySpace + this.leftPadding;
             } else
                 x += this._getHItemSize() + spacing;
+        }
+    },
+
+    swarmAnimation: function(page) {
+        log("animating " + this._animating);
+        if (this._animating)
+            return;
+        log("paginated swarm");
+        /*this.actor.disconnect(this._mappedId);
+        this._mappedId = 0;
+
+        log("animating" + items);
+        if (items.length == 0) {
+            this._mappedId = this.actor.connect("notify::allocation", Lang.bind(this, 
+                function() {
+                    if (this.actor.mapped)
+                        this.swarmAnimation(0);
+                }));
+        }*/
+        let items = this._getItemsInPage(page);
+        // TODO: Fix this
+        if (items.length == 0)
+            return;
+        this._animating = true;
+        for (let index = 0; index < items.length; index++) {
+            items[index].actor.opacity = 0;
+            this._animateItem(items[index]);
         }
     },
 
@@ -647,6 +768,20 @@ const PaginatedIconGrid = new Lang.Class({
             return 0;
         }
         return Math.floor(index / this._childrenPerPage);
+    },
+
+    _getItemsInPage: function(pageNumber) {
+        let items = this._getVisibleItems();
+        let firstIndex = this._childrenPerPage * pageNumber;
+        let indexOffset = 0;
+        let itemsInPage = []
+
+        while (indexOffset < this._childrenPerPage && firstIndex + indexOffset < items.length) {
+               itemsInPage.push(items[firstIndex + indexOffset]);
+               indexOffset++;
+        }
+
+        return itemsInPage;
     },
 
     /**
